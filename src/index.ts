@@ -2,36 +2,84 @@ import aws from 'aws-sdk';
 const documentClient = new aws.DynamoDB.DocumentClient();
 
 exports.handler = async (event?) => {
-    const bookRequested = event;
-
-    // if (bookRequested) {
-    //     const bookRequest = await getBooks(bookRequested)
-    //     const response = {
-    //         body: bookRequest.title && bookRequest.owner
-    //     }
-
-    // } else {
-    const books = await getAllBooks();
-    const response = {
+    console.log('event', event);
+    const response: any = {
         statusCode: 200,
         headers: {
             "Access-Control-Allow-Headers": "Content-Type",
             "Access-Control-Allow-Origin": '*',
-            "Access-Control-Allow-Methods": "OPTIONS,POST,GET"
-        },
-        body: JSON.stringify(books)
+            "Access-Control-Allow-Methods": "OPTIONS,POST,GET, PUT, DELETE"
+        }
     };
+    if (event.path === '/users' && event.httpMethod === 'GET') {
+        // Pull from user tables where email is the same as the email in the event
+        // event.queryStringParameters.email
+        const getParams: aws.DynamoDB.DocumentClient.GetItemInput = {
+            TableName: 'audible-users',
+            Key: {
+                email: event.queryStringParameters.email
+            }
+        };
+        const user = await documentClient.get(getParams).promise();
+        response.body = JSON.stringify(user.Item);
+        return response;
+    } else if (event.path === '/users' && event.httpMethod === 'POST') {
+        // Create a new user if they don't exist with the bookId in an array
+        // Then if they do exist, add the bookId to the array
+        const user = event.queryStringParameters.email;
+        const bookId = event.queryStringParameters.bookId;
+        try {
+            const updateParams: aws.DynamoDB.DocumentClient.UpdateItemInput = {
+                TableName: 'audible-users',
+                Key: {
+                    email: user
+                },
+                UpdateExpression: 'ADD bookId :bookId',
+                ExpressionAttributeValues: {
+                    ':bookId': documentClient.createSet([bookId])
+                }
+            };
+            await documentClient.update(updateParams).promise();
+            return response;
+        } catch (error) {
+            console.log('User does not exist creating', error);
+            const putParams: aws.DynamoDB.DocumentClient.PutItemInput = {
+                TableName: 'audible-users',
+                Item: {
+                    bookId: documentClient.createSet([bookId]),
+                    email: user
+                }
+            };
+            await documentClient.put(putParams).promise();
+            return response;
+        }
+    } else if (event.path === '/users' && event.httpMethod === 'DELETE') {
+        // Delete the bookId from the specified user
+        const user = event.queryStringParameters.email;
+        const bookId = event.queryStringParameters.bookId;
+        const deleteParams: aws.DynamoDB.DocumentClient.UpdateItemInput = {
+            TableName: 'audible-users',
+            Key: {
+                email: user
+            },
+            UpdateExpression: 'DELETE bookId :bookId', 
+            ExpressionAttributeValues: {
+                ':bookId': documentClient.createSet([bookId])
+            }
+            
+        };
+        await documentClient.update(deleteParams).promise();
+        return response;
+    }
+    const books = await getAllBooks();
+    response.body = JSON.stringify(books);
     return response;
-    // }
-
-
 };
 
 async function getAllBooks(books = [], lastEvaluatedKey?: aws.DynamoDB.DocumentClient.Key) {
 
     const scanParams: aws.DynamoDB.DocumentClient.ScanInput = {
         TableName: 'audible-libraries',
-        // ProjectionExpression: 'title'
     };
     if (lastEvaluatedKey) {
         scanParams.ExclusiveStartKey = lastEvaluatedKey;
@@ -49,33 +97,20 @@ async function getAllBooks(books = [], lastEvaluatedKey?: aws.DynamoDB.DocumentC
 
     return books;
 }
-// async function getBooks(bookRequested){
 
-//     const scanParams: aws.DynamoDB.DocumentClient.ScanInput = {
-//         TableName: 'audible-libraries',
-//        ProjectionExpression: 'title && owner',
-//        FilterExpression: `contains(${bookRequested},:gen)` 
-
-//     }
-
-// }
-
-
-// async function scanTitles(existingTitles = [], lastEvaluatedKey?: aws.DynamoDB.DocumentClient.Key) {
-
-//     const scanParams: aws.DynamoDB.DocumentClient.ScanInput = {
-//         TableName: 'audible-libraries',
-//         ProjectionExpression: 'title'
-//     };
-//     if (lastEvaluatedKey) {
-//         scanParams.ExclusiveStartKey = lastEvaluatedKey;
-//     }
-//     const titleResponse = await documentClient.scan(scanParams).promise();
-//     existingTitles.push(...titleResponse.Items);
-
-//     if (titleResponse.LastEvaluatedKey) {
-//         return await scanTitles(existingTitles, titleResponse.LastEvaluatedKey);
-//     }
-
-//     return existingTitles;
-// }
+async function toggleLike(book: any) {
+    const updateParams: aws.DynamoDB.DocumentClient.UpdateItemInput = {
+        TableName: 'audible-libraries',
+        Key: {
+            id: book.id
+        },
+        UpdateExpression: 'set liked = :liked',
+        ExpressionAttributeValues: {
+            ':liked': !book.liked
+        }
+    };
+    console.log('Update params', updateParams);
+    const updateResponse = await documentClient.update(updateParams).promise();
+    console.log("update response", updateResponse);
+    return updateResponse;
+}
