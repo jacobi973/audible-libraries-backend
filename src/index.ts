@@ -57,19 +57,31 @@ exports.handler = async (event?) => {
         // Delete the bookId from the specified user
         const user = event.queryStringParameters.email;
         const bookId = event.queryStringParameters.bookId;
-        const deleteParams: aws.DynamoDB.DocumentClient.UpdateItemInput = {
-            TableName: 'audible-users',
-            Key: {
-                email: user
-            },
-            UpdateExpression: 'DELETE bookId :bookId', 
-            ExpressionAttributeValues: {
-                ':bookId': documentClient.createSet([bookId])
-            }
-            
-        };
-        await documentClient.update(deleteParams).promise();
-        return response;
+        if (bookId) {
+            const deleteParams: aws.DynamoDB.DocumentClient.UpdateItemInput = {
+                TableName: 'audible-users',
+                Key: {
+                    email: user
+                },
+                UpdateExpression: 'DELETE bookId :bookId', 
+                ExpressionAttributeValues: {
+                    ':bookId': documentClient.createSet([bookId])
+                }
+                
+            };
+            await documentClient.update(deleteParams).promise();
+            return response;
+        } else {
+            const deleteParams: aws.DynamoDB.DocumentClient.DeleteItemInput = {
+                TableName: 'audible-users',
+                Key: {
+                    email: user
+                }
+            };
+            await documentClient.delete(deleteParams).promise();
+            return response;
+        }
+
     }
     const books = await getAllBooks();
     response.body = JSON.stringify(books);
@@ -96,21 +108,4 @@ async function getAllBooks(books = [], lastEvaluatedKey?: aws.DynamoDB.DocumentC
     }
 
     return books;
-}
-
-async function toggleLike(book: any) {
-    const updateParams: aws.DynamoDB.DocumentClient.UpdateItemInput = {
-        TableName: 'audible-libraries',
-        Key: {
-            id: book.id
-        },
-        UpdateExpression: 'set liked = :liked',
-        ExpressionAttributeValues: {
-            ':liked': !book.liked
-        }
-    };
-    console.log('Update params', updateParams);
-    const updateResponse = await documentClient.update(updateParams).promise();
-    console.log("update response", updateResponse);
-    return updateResponse;
 }
